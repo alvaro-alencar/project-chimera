@@ -2,16 +2,21 @@ import express from 'express';
 import http from 'http';
 import axios from 'axios';
 import { createProxyMiddleware } from 'http-proxy-middleware';
+import cors from 'cors'; // Importamos o cors
 
 const PORT = 4001;
 const app = express();
 const server = http.createServer(app);
 
-// Endereços dos nossos microsserviços
+// --- INÍCIO DA CORREÇÃO ---
+// Habilita o CORS, permitindo que o frontend na porta 3000 se comunique conosco.
+app.use(cors({ origin: 'http://localhost:3000' }));
+// --- FIM DA CORREÇÃO ---
+
 const MATCHMAKING_SERVICE_URL = 'http://localhost:4003';
 const CHAT_SERVICE_URL = 'http://localhost:4002';
 
-// Proxy para requisições HTTP normais (como o matchmaking)
+// Proxy para requisições HTTP
 app.post('/api/v1/matchmaking/find', async (req, res) => {
   console.log('[API Gateway]: Recebida requisição em /api/v1/matchmaking/find. Repassando...');
   try {
@@ -23,14 +28,15 @@ app.post('/api/v1/matchmaking/find', async (req, res) => {
   }
 });
 
-// *** CORREÇÃO: A linha 'logLevel' foi removida ***
 // Proxy para WebSockets
 app.use('/ws', createProxyMiddleware({
   target: CHAT_SERVICE_URL,
-  ws: true, // Habilita o proxy para WebSockets
+  ws: true,
+  pathRewrite: {
+    '^/ws': '', 
+  },
 }));
 
-// Agora, usamos o `server.listen` em vez do `app.listen` para suportar o WebSocket
 server.listen(PORT, () => {
   console.log(`[API Gateway]: Serviço HTTP e WS Proxy rodando na porta ${PORT}`);
 });

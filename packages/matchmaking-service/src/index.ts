@@ -3,46 +3,40 @@ import crypto from 'crypto';
 import axios from 'axios';
 
 const PORT = 4003;
-const CHAT_SERVICE_URL = 'http://localhost:4002'; // Endereço do nosso vizinho
+const CHAT_SERVICE_URL = 'http://localhost:4002';
 const app = express();
 
 let waitingPlayer: Response | null = null;
 
 app.post('/find', async (req: Request, res: Response) => {
-  console.log('[Matchmaking Service]: Requisição recebida para encontrar partida!');
+  console.log('[Matchmaking Service]: Requisição recebida!');
 
+  // Se já houver um jogador esperando, faz o match entre humanos.
   if (waitingPlayer) {
-    console.log('[Matchmaking Service]: Match encontrado! Gerando roomId...');
+    console.log('[Matchmaking Service]: Match Humano-Humano encontrado!');
     const localWaitingPlayer = waitingPlayer;
-    waitingPlayer = null; // Limpa o lobby
-
+    waitingPlayer = null;
     const roomId = crypto.randomUUID();
 
     try {
-      // *** LÓGICA DE COMUNICAÇÃO SERVIÇO-A-SERVIÇO ***
-      console.log(`[Matchmaking Service]: Informando o Chat Service para preparar a sala ${roomId}...`);
-      await axios.post(`${CHAT_SERVICE_URL}/internal/api/rooms/create`, { roomId });
-
-      // Só responde aos jogadores DEPOIS que a sala foi criada com sucesso no chat-service
-      console.log(`[Matchmaking Service]: Sala preparada. Respondendo aos jogadores.`);
+      // Avisa o chat-service para criar uma sala normal
+      await axios.post(`${CHAT_SERVICE_URL}/internal/api/rooms/create`, { roomId, isAiRoom: false });
       localWaitingPlayer.status(200).json({ roomId });
       res.status(200).json({ roomId });
-
     } catch (error: any) {
-      console.error("[Matchmaking Service]: Erro ao criar a sala no Chat Service!", error.message);
-      // Se a criação da sala falhar, informa os jogadores e não os coloca na fila novamente.
+      console.error("[Matchmaking Service]: Erro ao criar sala para humanos!", error.message);
       localWaitingPlayer.status(500).json({ error: 'Falha ao criar a sala de chat.' });
       res.status(500).json({ error: 'Falha ao criar a sala de chat.' });
     }
   } else {
-    console.log('[Matchmaking Service]: Nenhum jogador na fila. Adicionando jogador ao lobby.');
+    // Se não houver ninguém esperando, este jogador espera por um humano.
+    console.log('[Matchmaking Service]: Adicionando jogador ao lobby para partida Humano-Humano.');
     waitingPlayer = res;
 
-    // Se o cliente que está esperando fechar a conexão, removemos ele do lobby
     req.on('close', () => {
       if (waitingPlayer === res) {
         waitingPlayer = null;
-        console.log('[Matchmaking Service]: Jogador em espera desconectou. Removido do lobby.');
+        console.log('[Matchmaking Service]: Jogador em espera desconectou.');
       }
     });
   }

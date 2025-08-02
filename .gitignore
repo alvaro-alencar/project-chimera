@@ -1,0 +1,10 @@
+node_modules
+
+# Ignorar o ambiente virtual
+venv/
+
+# Ignorar o arquivo com a chave de API
+.env
+
+# Pastas de cache do Python
+__pycache__/
