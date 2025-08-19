@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Lobby } from '../components/Lobby'; // Importa o componente Lobby
-import { ChatRoom } from '../components/ChatRoom'; // Importa o componente ChatRoom
+import { Lobby } from '../components/Lobby';
+import { ChatRoom } from '../components/ChatRoom';
+import { GuessForm, Guess, Stats } from '../components/GuessForm';
 
 type Message = {
   text: string;
@@ -14,8 +15,10 @@ export default function HomePage() {
   const [status, setStatus] = useState('Pronto para encontrar um parceiro de conversa.');
   const [isLoading, setIsLoading] = useState(false);
   const [roomId, setRoomId] = useState<string | null>(null);
+  const [phase, setPhase] = useState<'lobby' | 'chat' | 'guess'>('lobby');
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
+  const [stats, setStats] = useState<Stats | null>(null);
   const ws = useRef<WebSocket | null>(null);
 
   // --- LÓGICA DE CONEXÃO (Permanece aqui) ---
@@ -23,21 +26,35 @@ export default function HomePage() {
     setStatus(`Conectando à sala ${newRoomId.substring(0, 8)}...`);
     const wsUrl = `ws://localhost:4002?roomId=${newRoomId}`;
     ws.current = new WebSocket(wsUrl);
-    ws.current.onopen = () => { setStatus('Conectado!'); setRoomId(newRoomId); setIsLoading(false); };
-    ws.current.onmessage = (event) => { setMessages(prev => [...prev, { text: event.data, type: 'received' }]); };
+    ws.current.onopen = () => { setStatus('Conectado!'); setRoomId(newRoomId); setIsLoading(false); setPhase('chat'); };
+    ws.current.onmessage = (event) => {
+      if (event.data === '__TIME_UP__') {
+        setStatus('Tempo esgotado! Vote abaixo.');
+        setPhase('guess');
+        ws.current?.close();
+      } else {
+        setMessages(prev => [...prev, { text: event.data, type: 'received' }]);
+      }
+    };
     ws.current.onclose = (event: CloseEvent) => {
       console.log('WebSocket connection closed:', event);
       setStatus(`Desconectado. Código: ${event.code}.`);
-      setIsLoading(false); setRoomId(null); ws.current = null;
+      setIsLoading(false);
+      ws.current = null;
+      if (phase !== 'guess') {
+        setRoomId(null);
+        setPhase('lobby');
+      }
     };
     ws.current.onerror = (event: Event) => {
       setStatus('Erro de conexão WebSocket.'); console.error('WebSocket Error Event:', event);
-      setIsLoading(false); setRoomId(null); ws.current = null;
+      setIsLoading(false); setRoomId(null); ws.current = null; setPhase('lobby');
     };
   };
 
   const handleFindMatch = async () => {
     setIsLoading(true); setStatus('Procurando um parceiro...');
+    setMessages([]); setStats(null);
     try {
       const response = await fetch('http://localhost:4001/api/v1/matchmaking/find', { method: 'POST' });
       if (!response.ok) { throw new Error(`Erro no matchmaking: ${response.statusText}`); }
@@ -56,6 +73,30 @@ export default function HomePage() {
     }
   };
 
+  const handleGuess = async (guess: Guess) => {
+    if (!roomId) return;
+    try {
+      await fetch('http://localhost:4005/api/v1/vote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomId, guess })
+      });
+      const statsRes = await fetch('http://localhost:4005/api/v1/stats');
+      const statsData = await statsRes.json();
+      setStats(statsData);
+    } catch (error) {
+      console.error('Erro ao enviar voto:', error);
+    }
+  };
+
+  const handleRestart = () => {
+    setPhase('lobby');
+    setRoomId(null);
+    setMessages([]);
+    setStats(null);
+    setStatus('Pronto para encontrar um parceiro de conversa.');
+  };
+
   // Efeito para rolar a janela de chat (Permanece aqui)
   useEffect(() => {
     const messagesContainer = document.getElementById('messages');
@@ -70,20 +111,23 @@ export default function HomePage() {
       <div style={{ width: '400px', backgroundColor: '#1e1e1e', padding: '2rem', borderRadius: '8px' }}>
         <h1 style={{ textAlign: 'center', color: '#bb86fc', marginBottom: '1rem' }}>Project Chimera</h1>
         
-        {/* Lógica condicional: Se não houver roomId, mostre o Lobby. Senão, mostre a ChatRoom. */}
-        {!roomId ? (
-          <Lobby 
-            status={status} 
-            isLoading={isLoading} 
-            onFindMatch={handleFindMatch} 
+        {phase === 'lobby' && (
+          <Lobby
+            status={status}
+            isLoading={isLoading}
+            onFindMatch={handleFindMatch}
           />
-        ) : (
-          <ChatRoom 
+        )}
+        {phase === 'chat' && (
+          <ChatRoom
             messages={messages}
             inputText={inputText}
             setInputText={setInputText}
             onSendMessage={handleSendMessage}
           />
+        )}
+        {phase === 'guess' && (
+          <GuessForm onGuess={handleGuess} stats={stats} onRestart={handleRestart} />
         )}
       </div>
     </main>

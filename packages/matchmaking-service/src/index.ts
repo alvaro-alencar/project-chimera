@@ -4,6 +4,7 @@ import axios from 'axios';
 
 const PORT = 4003;
 const CHAT_SERVICE_URL = 'http://localhost:4002';
+const VOTING_SERVICE_URL = 'http://localhost:4005';
 const app = express();
 
 let waitingPlayer: Response | null = null;
@@ -21,6 +22,7 @@ app.post('/find', async (req: Request, res: Response) => {
     try {
       // Avisa o chat-service para criar uma sala normal
       await axios.post(`${CHAT_SERVICE_URL}/internal/api/rooms/create`, { roomId, isAiRoom: false });
+      await axios.post(`${VOTING_SERVICE_URL}/internal/api/rooms/register`, { roomId, isAiRoom: false });
       localWaitingPlayer.status(200).json({ roomId });
       res.status(200).json({ roomId });
     } catch (error: any) {
@@ -29,16 +31,31 @@ app.post('/find', async (req: Request, res: Response) => {
       res.status(500).json({ error: 'Falha ao criar a sala de chat.' });
     }
   } else {
-    // Se não houver ninguém esperando, este jogador espera por um humano.
-    console.log('[Matchmaking Service]: Adicionando jogador ao lobby para partida Humano-Humano.');
-    waitingPlayer = res;
-
-    req.on('close', () => {
-      if (waitingPlayer === res) {
-        waitingPlayer = null;
-        console.log('[Matchmaking Service]: Jogador em espera desconectou.');
+    // 50% de chance de jogar com a IA imediatamente
+    const playWithAi = Math.random() < 0.5;
+    if (playWithAi) {
+      console.log('[Matchmaking Service]: Iniciando partida contra IA.');
+      const roomId = crypto.randomUUID();
+      try {
+        await axios.post(`${CHAT_SERVICE_URL}/internal/api/rooms/create`, { roomId, isAiRoom: true });
+        await axios.post(`${VOTING_SERVICE_URL}/internal/api/rooms/register`, { roomId, isAiRoom: true });
+        res.status(200).json({ roomId });
+      } catch (error: any) {
+        console.error("[Matchmaking Service]: Erro ao criar sala para IA!", error.message);
+        res.status(500).json({ error: 'Falha ao criar a sala de chat.' });
       }
-    });
+    } else {
+      // Caso contrário, adiciona ao lobby e espera por outro humano.
+      console.log('[Matchmaking Service]: Adicionando jogador ao lobby para partida Humano-Humano.');
+      waitingPlayer = res;
+
+      req.on('close', () => {
+        if (waitingPlayer === res) {
+          waitingPlayer = null;
+          console.log('[Matchmaking Service]: Jogador em espera desconectou.');
+        }
+      });
+    }
   }
 });
 
