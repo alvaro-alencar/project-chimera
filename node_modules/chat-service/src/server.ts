@@ -7,6 +7,7 @@ import axios from 'axios';
 
 const PORT = 4002;
 const AI_SERVICE_URL = 'http://localhost:4004'; // Endereço do nosso cérebro
+const FIVE_MINUTES = 5 * 60 * 1000;
 
 const app = express();
 app.use(cors({ origin: 'http://localhost:3000' }));
@@ -18,6 +19,7 @@ interface Room {
   clients: Set<WebSocket>;
   isAiRoom: boolean;
   history: { role: 'user' | 'assistant'; content: string }[];
+  timeout: NodeJS.Timeout;
 }
 const rooms = new Map<string, Room>();
 
@@ -33,7 +35,20 @@ app.post('/internal/api/rooms/create', (req, res) => {
   }
 
   // Cria a sala com a informação se é de IA ou não
-  rooms.set(roomId, { clients: new Set(), isAiRoom, history: [] });
+  const timeout = setTimeout(() => {
+    const room = rooms.get(roomId);
+    if (!room) return;
+    room.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send('__TIME_UP__');
+        client.close(1000, 'Tempo esgotado');
+      }
+    });
+    rooms.delete(roomId);
+    console.log(`[Chat Service]: Sala ${roomId} encerrada por tempo.`);
+  }, FIVE_MINUTES);
+
+  rooms.set(roomId, { clients: new Set(), isAiRoom, history: [], timeout });
   console.log(`[Chat Service]: Sala ${roomId} (IA: ${isAiRoom}) preparada.`);
   res.status(201).json({ message: 'Sala criada com sucesso.' });
 });
@@ -93,6 +108,7 @@ wss.on('connection', (ws: WebSocket, req) => {
     room.clients.delete(ws);
     console.log(`[Chat Service]: Cliente desconectado da sala ${roomId}. Total: ${room.clients.size}`);
     if (room.clients.size === 0) {
+      clearTimeout(room.timeout);
       rooms.delete(roomId);
       console.log(`[Chat Service]: Sala ${roomId} ficou vazia e foi removida.`);
     }
