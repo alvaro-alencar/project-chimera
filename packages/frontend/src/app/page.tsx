@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Lobby } from '../components/Lobby';
 import { ChatRoom } from '../components/ChatRoom';
 import { GuessForm, Guess, Stats } from '../components/GuessForm';
+import styles from './page.module.css';
 
 type Message = {
   text: string;
@@ -11,7 +12,6 @@ type Message = {
 };
 
 export default function HomePage() {
-  // --- GERENCIAMENTO DE ESTADO (Permanece aqui) ---
   const [status, setStatus] = useState('Pronto para encontrar um parceiro de conversa.');
   const [isLoading, setIsLoading] = useState(false);
   const [roomId, setRoomId] = useState<string | null>(null);
@@ -20,13 +20,86 @@ export default function HomePage() {
   const [inputText, setInputText] = useState('');
   const [stats, setStats] = useState<Stats | null>(null);
   const ws = useRef<WebSocket | null>(null);
+  const pollingInterval = useRef<NodeJS.Timeout | null>(null);
 
-  // --- LÓGICA DE CONEXÃO (Permanece aqui) ---
+  // Limpa o polling quando o componente é desmontado
+  useEffect(() => {
+    return () => {
+      if (pollingInterval.current) {
+        clearInterval(pollingInterval.current);
+      }
+    };
+  }, []);
+
+  const pollForMatch = (ticketId: string) => {
+    // Para o polling anterior, se houver
+    if (pollingInterval.current) clearInterval(pollingInterval.current);
+
+    pollingInterval.current = setInterval(async () => {
+      try {
+        // Usa a porta do Gateway (4001), que repassa para o Matchmaking (4003)
+        const response = await fetch(`http://localhost:4001/api/v1/matchmaking/status/${ticketId}`);
+        
+        if (response.status === 200) { // 200 OK = Match Encontrado
+          if (pollingInterval.current) clearInterval(pollingInterval.current);
+          const data = await response.json();
+          connectToChat(data.roomId);
+        } else if (response.status === 204) { // 204 No Content = Ainda esperando
+          console.log(`Ticket ${ticketId} ainda esperando...`);
+        } else { // Outro status = Erro
+          if (pollingInterval.current) clearInterval(pollingInterval.current);
+          setStatus('Falha ao procurar partida. Tente novamente.');
+          setIsLoading(false);
+        }
+      } catch (error) {
+        if (pollingInterval.current) clearInterval(pollingInterval.current);
+        console.error('Erro no polling:', error);
+        setStatus('Erro de conexão. Tente novamente.');
+        setIsLoading(false);
+      }
+    }, 2000); // Verifica a cada 2 segundos
+  };
+
+  const handleFindMatch = async () => {
+    setIsLoading(true); 
+    setStatus('Procurando um parceiro...');
+    setMessages([]); 
+    setStats(null);
+    try {
+      // O Gateway precisa ser atualizado para repassar a nova rota GET também.
+      const response = await fetch('http://localhost:4001/api/v1/matchmaking/find', { method: 'POST' });
+      
+      if (!response.ok) throw new Error(`Status: ${response.status}`);
+
+      const data = await response.json();
+
+      if (response.status === 200 && data.roomId) { // Match imediato com IA
+        connectToChat(data.roomId);
+      } else if (response.status === 202 && data.ticketId) { // Entrou na fila de espera
+        pollForMatch(data.ticketId);
+      }
+
+    } catch (error) {
+      setStatus('Falha ao procurar partida.'); 
+      setIsLoading(false); 
+      console.error('Matchmaking Error:', error);
+    }
+  };
+
+  // ... (o resto do arquivo permanece o mesmo) ...
+
   const connectToChat = (newRoomId: string) => {
     setStatus(`Conectando à sala ${newRoomId.substring(0, 8)}...`);
-    const wsUrl = `ws://localhost:4002?roomId=${newRoomId}`;
+    const wsUrl = `ws://localhost:4001/ws?roomId=${newRoomId}`;
     ws.current = new WebSocket(wsUrl);
-    ws.current.onopen = () => { setStatus('Conectado!'); setRoomId(newRoomId); setIsLoading(false); setPhase('chat'); };
+    
+    ws.current.onopen = () => { 
+      setStatus('Conectado!'); 
+      setRoomId(newRoomId); 
+      setIsLoading(false); 
+      setPhase('chat'); 
+    };
+
     ws.current.onmessage = (event) => {
       if (event.data === '__TIME_UP__') {
         setStatus('Tempo esgotado! Vote abaixo.');
@@ -36,6 +109,7 @@ export default function HomePage() {
         setMessages(prev => [...prev, { text: event.data, type: 'received' }]);
       }
     };
+
     ws.current.onclose = (event: CloseEvent) => {
       console.log('WebSocket connection closed:', event);
       setStatus(`Desconectado. Código: ${event.code}.`);
@@ -46,27 +120,19 @@ export default function HomePage() {
         setPhase('lobby');
       }
     };
-    ws.current.onerror = (event: Event) => {
-      setStatus('Erro de conexão WebSocket.'); console.error('WebSocket Error Event:', event);
-      setIsLoading(false); setRoomId(null); ws.current = null; setPhase('lobby');
-    };
-  };
 
-  const handleFindMatch = async () => {
-    setIsLoading(true); setStatus('Procurando um parceiro...');
-    setMessages([]); setStats(null);
-    try {
-      const response = await fetch('http://localhost:4001/api/v1/matchmaking/find', { method: 'POST' });
-      if (!response.ok) { throw new Error(`Erro no matchmaking: ${response.statusText}`); }
-      const data = await response.json();
-      connectToChat(data.roomId);
-    } catch (error) {
-      setStatus('Falha ao procurar partida.'); setIsLoading(false); console.error('Matchmaking Error:', error);
-    }
+    ws.current.onerror = (event: Event) => {
+      setStatus('Erro de conexão WebSocket.'); 
+      console.error('WebSocket Error Event:', event);
+      setIsLoading(false); 
+      setRoomId(null); 
+      ws.current = null; 
+      setPhase('lobby');
+    };
   };
   
   const handleSendMessage = () => {
-    if (ws.current && ws.current.readyState === WebSocket.OPEN && inputText) {
+    if (ws.current && ws.current.readyState === WebSocket.OPEN && inputText.trim()) {
       ws.current.send(inputText);
       setMessages(prev => [...prev, { text: inputText, type: 'sent' }]);
       setInputText('');
@@ -79,7 +145,7 @@ export default function HomePage() {
       await fetch('http://localhost:4005/api/v1/vote', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ roomId, guess })
+        body: JSON.stringify({ roomId, guess, voterType: 'human' })
       });
       const statsRes = await fetch('http://localhost:4005/api/v1/stats');
       const statsData = await statsRes.json();
@@ -90,6 +156,7 @@ export default function HomePage() {
   };
 
   const handleRestart = () => {
+    if (pollingInterval.current) clearInterval(pollingInterval.current);
     setPhase('lobby');
     setRoomId(null);
     setMessages([]);
@@ -97,7 +164,6 @@ export default function HomePage() {
     setStatus('Pronto para encontrar um parceiro de conversa.');
   };
 
-  // Efeito para rolar a janela de chat (Permanece aqui)
   useEffect(() => {
     const messagesContainer = document.getElementById('messages');
     if (messagesContainer) {
@@ -105,11 +171,10 @@ export default function HomePage() {
     }
   }, [messages]);
 
-  // --- RENDERIZAÇÃO (Agora muito mais limpa) ---
   return (
-    <main style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ width: '400px', backgroundColor: '#1e1e1e', padding: '2rem', borderRadius: '8px' }}>
-        <h1 style={{ textAlign: 'center', color: '#bb86fc', marginBottom: '1rem' }}>Project Chimera</h1>
+    <main className={styles.main}>
+      <div className={styles.container}>
+        <h1 className={styles.title}>Project Chimera</h1>
         
         {phase === 'lobby' && (
           <Lobby

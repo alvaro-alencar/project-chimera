@@ -1,0 +1,73 @@
+.guessContainer {
+  text-align: center;
+}
+
+.title {
+  color: #e0e0e0;
+  margin-bottom: 1.5rem;
+}
+
+.buttonContainer {
+  display: flex;
+  justify-content: center;
+}
+
+.button {
+  padding: 12px 24px;
+  margin: 0 10px;
+  border: none;
+  border-radius: 5px;
+  font-size: 1rem;
+  cursor: pointer;
+  color: #121212;
+  font-weight: bold;
+  transition: transform 0.2s ease;
+}
+
+.button:hover {
+  transform: translateY(-2px);
+}
+
+.humanButton {
+  background-color: #03dac6;
+}
+
+.aiButton {
+  background-color: #bb86fc;
+}
+
+.statsContainer {
+  background-color: #2c2c2c;
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+}
+
+.statsTitle {
+  color: #03dac6;
+  margin-bottom: 1rem;
+}
+
+.statsBlock {
+  margin-bottom: 1rem;
+}
+
+.statsBlock:last-child {
+  margin-bottom: 0;
+}
+
+.statsBlock h4 {
+  margin: 0;
+  color: #a0a0a0;
+}
+
+.statsBlock p {
+  margin: 5px 0;
+  font-size: 1.2rem;
+}
+
+.restartButton {
+  background-color: #cf6679;
+  color: white;
+  width: 100%;
+}
